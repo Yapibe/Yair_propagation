@@ -5,6 +5,7 @@ from scipy.stats import rankdata, ranksums
 import matplotlib.pyplot as plt
 import shutil
 from scipy.stats import hypergeom
+from scipy.stats import norm
 
 
 MIN_GENE_PER_PATHWAY = 20
@@ -25,6 +26,7 @@ genes_names_file_path = path.join(data_dir, species, 'genes_names', genes_names_
 pathway_file_dir = path.join(data_dir, species, 'pathways', pathway_file)
 
 temp_output_folder = path.join(root_path, 'Outputs', 'Temp')
+unique_genes = set()
 # Ensure output directories exist
 makedirs(temp_output_folder, exist_ok=True)
 
@@ -103,6 +105,11 @@ def perform_statist(test_name):
         if MIN_GENE_PER_PATHWAY <= len(set(genes).intersection(scores_keys)) <= MAX_GENE_PER_PATHWAY
     }
 
+    for pathway, genes in pathways_with_many_genes.items():
+        unique_genes.update(genes)
+
+
+
     M = len(scores_keys)  # Total number of genes
     n = len(significant_p_vals)  # Number of enriched genes
 
@@ -142,20 +149,37 @@ def perform_statist(test_name):
     return ks_significant_pathways_with_genes, scores
 
 
+def precalculate_scores_and_ranks(scores):
+    # Assuming 'scores' is a dictionary where keys are gene IDs and values are scores
+    combined_scores = np.array(list(scores.values()))
+    sorted_indices = np.argsort(combined_scores)
+    sorted_scores = combined_scores[sorted_indices]
+    ranks = np.argsort(sorted_indices) + 1  # This gives ranks starting from 1
+    return sorted_scores, ranks
+
+
 def perform_statist_mann_whitney(passed_ks_pathway_dict, scores):
     mw_p_values = []
     significant_pathways_with_genes = {}
 
-    scores_keys = set(scores['Score'].keys())
+    # scores_keys = set(scores['Score'].keys())
+    # create a dict where keys are gene IDs and values are scores from unique genes
+    unique_scores = {gene_id: scores['Score'][gene_id] for gene_id in unique_genes}
+    sorted_scores, ranks = precalculate_scores_and_ranks(unique_scores)
 
     # Mann-Whitney U test and FDR
     for pathway, genes_info in passed_ks_pathway_dict.items():
         pathway_genes = set(genes_info[0])
-        pathway_scores = [scores['Score'][gene_id] for gene_id in pathway_genes]
-        background_scores = [scores['Score'][gene_id] for gene_id in scores_keys - pathway_genes]
+        # get the indices of the genes in the pathway from the sorted scores
+        pathway_indices = [np.searchsorted(sorted_scores, scores['Score'][gene_id]) for gene_id in pathway_genes]
+        # get background indices
+        background_indices = [np.searchsorted(sorted_scores, scores['Score'][gene_id]) for gene_id in unique_genes - pathway_genes]
+        # pathway_scores = [scores['Score'][gene_id] for gene_id in pathway_genes]
+        # background_scores = [scores['Score'][gene_id] for gene_id in unique_genes - pathway_genes]
 
         # Perform Mann-Whitney U Test
-        mw_pval = wilcoxon_rank_sums_test(pathway_scores, background_scores)
+        #mw_pval = wilcoxon_rank_sums_test(pathway_scores, background_scores)
+        _, mw_pval = compute_mw_python(sorted_scores, ranks, pathway_indices, background_indices)
         mw_p_values.append(mw_pval)
 
 
@@ -244,6 +268,41 @@ def wilcoxon_rank_sums_test(experiment_scores, elements_scores, alternative='two
     p_vals = ranksums(experiment_scores, elements_scores, alternative=alternative).pvalue
     return p_vals
 
+def compute_mw_python(sorted_scores, ranks, experiment_indices, control_indices):
+    R1 = np.sum(ranks[experiment_indices])
+    # Combine the two arrays and sort them
+    combined_scores = np.concatenate([experiment_scores, control_scores])
+    # Compute ranks
+    ranks = np.argsort(np.argsort(combined_scores)) + 1
+
+    # Split ranks back into experiment and control groups
+    experiment_ranks = ranks[:len(experiment_scores)]
+    control_ranks = ranks[len(experiment_scores):]
+
+    # Calculate the rank sums for the experiment and control groups
+    R1 = np.sum(experiment_ranks)
+    R2 = np.sum(control_ranks)
+
+    # Number of observations in each group
+    n = len(experiment_scores) + len(control_scores)
+    size = len(experiment_scores)
+
+    # Calculate the rank sum for the group under consideration (experiment group)
+    val = R1
+    val2 = size * (n - size) - (R1 - size * (size + 1) / 2)
+
+    # Use the smaller of the two values for further calculations
+    val = min(val, val2)
+
+    # Calculate the Z-score
+    z = (val - size * (n - size) / 2)
+    std = np.sqrt(size * (n - size) * (n + 1) / 12)
+    z /= std
+
+    # Compute the p-value
+    p_value = 2 * norm.cdf(-np.abs(z))
+
+    return val, p_value
 
 def print_enriched_pathways_to_file(filtered_pathways, output_folder, threshold=0.05):
     output_file_path = path.join(output_folder, f'{test_name}.txt')

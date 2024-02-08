@@ -56,15 +56,15 @@ def binomial_coefficient(n, k):
 
 def hypergeometric_pmf(K, k, N, n):
     """Calculate the probability mass function for the hypergeometric distribution."""
-    # # Number of ways to choose k successes from K possible successes
-    # success_ways = binomial_coefficient(K, k)
-    # # Number of ways to choose n-k failures from N-K possible failures
-    # failure_ways = binomial_coefficient(N - K, n - k)
-    # # Total number of ways to choose n draws out of N possible draws
-    # total_ways = binomial_coefficient(N, n)
-    #
-    # # Probability calculation
-    # probability = success_ways * failure_ways / total_ways
+    # Number of ways to choose k successes from K possible successes
+    success_ways = binomial_coefficient(K, k)
+    # Number of ways to choose n-k failures from N-K possible failures
+    failure_ways = binomial_coefficient(N - K, n - k)
+    # Total number of ways to choose n draws out of N possible draws
+    total_ways = binomial_coefficient(N, n)
+
+    # Probability calculation
+    probability = success_ways * failure_ways / total_ways
 
     # use scipy.stats.hypergeom
     probability = hypergeom.pmf(k, N, K, n)
